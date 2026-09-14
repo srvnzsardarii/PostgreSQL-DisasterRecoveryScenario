@@ -2,27 +2,31 @@
 ## 1. Purpose
 This runbook describes the recovery procedure for a PostgreSQL Payment Service database corruption incident.
 The objective is to recover corrupted transactional data while:
-* Minimizing data loss (RPO close to zero)
+* Minimizing data loss according to backup and WAL retention capability
 * Minimizing service downtime (Low RTO)
 * Preserving valid transactions
-* Restoring healthy Master-Slave replication
+* Restoring healthy PostgreSQL Master-Slave replication
 # 2. Incident Scenario
 A production migration/script was executed incorrectly on the PostgreSQL Master database.
 The incident caused:
 * Incorrect DELETE operations
 * Incorrect UPDATE operations
 * Invalid or duplicated transaction records
-Because Streaming Replication was enabled, corrupted WAL changes were replicated to the standby database.
+Because Streaming Replication was enabledcorrupted WAL changes were replicated to the Slave database.
 Important:
-The standby server cannot be considered a valid recovery source because it contains the same corrupted changes.
+The Slave server cannot be considered a valid recovery source because it contains the same corrupted changes.
+A PostgreSQL replica provides high availabilitybut it is not a replacement for backup.
 # 3. Initial Incident Response
 ## Step 1 — Stop Application Writes
 The first action is to prevent additional data changes.
 Example:
-```bash
-kubectl scale deployment payment-api --replicas=0
-```
-or redirect traffic to maintenance mode.
+bash
+kubectl scale deployment payment-api \
+-n payment-db \
+--replicas=0
+Verify:
+bash
+kubectl get pods -n payment-db
 Purpose:
 * Stop further corruption
 * Preserve current database state
@@ -32,130 +36,152 @@ Actions:
 * Stop running migrations
 * Disable automated deployment jobs
 * Restrict database access
+* Prevent manual production changes
 ## Step 3 — Collect Evidence
-Collect:
-PostgreSQL logs:
-```bash
-kubectl logs postgres-master
-```
-Database activity:
-```sql
+Collect Kubernetes and PostgreSQL evidence before recovery actions.
+Check PostgreSQL logs:
+bash
+kubectl logs postgres-Master \
+-n payment-db
+Check pod status:
+bash
+kubectl describe pod postgres-Master \
+-n payment-db
+Check database activity:
+sql
 SELECT *
 FROM pg_stat_activity;
-```
-Replication status:
-```sql
+Check replication status:
+sql
 SELECT
 client_addr,
 state,
+sync_state,
 sent_lsn,
 write_lsn,
 flush_lsn,
-replay_lsn
+replay_lsn,
+write_lag,
+flush_lag,
+replay_lag
 FROM pg_stat_replication;
-```
 # 4. Identify Corrupted Data
-The corruption window is identified from logs.
+The corruption window is identified from:
+* PostgreSQL logs
+* Application audit logs
+* Database audit tables
+* Transaction history
 Example:
-```
 Incident Start:
 12:45
-```
 Analyze affected records:
-```sql
+sql
 SELECT *
 FROM audit_logs
 WHERE event_time >= '12:45';
-```
 Identify:
 * Deleted transactions
 * Modified transactions
 * Invalid records
 # 5. Pause Replication
-Before recovery operations, pause standby replay.
-On PostgreSQL standby:
-```sql
+Before recovery operationspause Slave replay.
+Execute on PostgreSQL Slave only:
+sql
 SELECT pg_wal_replay_pause();
-```
 Verify:
-```sql
+sql
 SELECT pg_is_wal_replay_paused();
-```
 Purpose:
-Prevent additional WAL replay during investigation.
+* Prevent additional WAL replay during investigation
+* Freeze Slave state for analysis
+After recovery validation:
+sql
+SELECT pg_wal_replay_resume();
 # 6. Create Emergency Backup
 Before any repair operation:
-Create a safety backup.
+Create a safety backup of the current database state.
 Example:
-```bash
+bash
 pg_basebackup \
--h postgres-master \
+-h postgres-Master \
 -U replicator \
 -D /backup/emergency \
 -F tar \
 -X stream
-```
 Purpose:
-Allow rollback if recovery operation fails.
+* Preserve current state
+* Allow rollback if recovery operation fails
+* Support incident investigation
 # 7. Point In Time Recovery (PITR)
 A temporary recovery database is created.
 Example:
-```
 payment-recovery-db
-```
 Restore the database to a point before corruption:
-```
 Recovery Target:
 12:44:59
-```
 Using pgBackRest:
-```bash
+bash
 pgbackrest \
 --stanza=payment \
 --type=time \
 --target="2026-09-14 12:44:59" \
 restore
-```
+After reaching the recovery target:
+* Validate recovered data
+* Promote recovered instance for testing
 # 8. Compare Production and Recovery Database
 Two databases are compared:
 Production:
-```
 payment_prod
-```
 Recovery:
-```
 payment_restore
-```
-Example:
-Find deleted transactions:
-```sql
+## Find Deleted Transactions
+sql
 SELECT *
 FROM payment_restore.transactions r
 WHERE NOT EXISTS
 (
 SELECT 1
 FROM payment_prod.transactions p
-WHERE p.id=r.id
+WHERE p.id = r.id
 );
-```
-Find incorrect updates:
-```sql
+## Find Incorrect Updates
+sql
 SELECT
 p.id,
 p.amount,
-r.amount
+p.status,
+r.amount,
+r.status
 FROM payment_prod.transactions p
 JOIN payment_restore.transactions r
-ON p.id=r.id
-WHERE p.amount <> r.amount;
-```
+ON p.id = r.id
+WHERE
+p.amount <> r.amount
+OR p.status <> r.status;
+Purpose:
+* Identify corrupted records
+* Preserve valid transactions created after the incident
 # 9. Selective Data Repair
 Only corrupted records are restored.
+The full database should not be replaced because valid transactions after the incident time must be preserved.
+## Restore Deleted Transactions
 Example:
-Restore deleted transactions:
-```sql
+sql
 INSERT INTO transactions
-SELECT *
+(
+id,
+user_id,
+amount,
+status,
+created_at
+)
+SELECT
+id,
+user_id,
+amount,
+status,
+created_at
 FROM payment_restore.transactions
 WHERE id IN
 (
@@ -163,81 +189,67 @@ WHERE id IN
 10002,
 10003
 );
-```
-Restore incorrect updates:
-```sql
+## Restore Incorrect Updates
+sql
 UPDATE transactions t
 SET
-amount=r.amount,
-status=r.status
+amount = r.amount,
+status = r.status
 FROM payment_restore.transactions r
-WHERE t.id=r.id;
-```
-Important:
-Do not restore the entire database because valid transactions after the incident time must be preserved.
-# 10. Rebuild PostgreSQL Replica
-Because the standby database contains corrupted WAL changes, rebuild the replica.
-Stop standby:
-```bash
+WHERE t.id = r.id;
+# 10. Rebuild PostgreSQL Slave Replica
+Because the Slave database contains corrupted WAL changesrebuild the replica.
+Stop Slave:
+bash
 systemctl stop postgresql
-```
-Clean data directory:
-```bash
-rm -rf $PGDATA/*
-```
+Preserve existing data directory:
+bash
+mv $PGDATA ${PGDATA}_old_$(date +%F_%H%M)
 Clone from Master:
-```bash
+bash
 pg_basebackup \
--h postgres-master \
+-h postgres-Master \
 -D $PGDATA \
 -U replicator \
 -R
-```
 Start PostgreSQL:
-```bash
+bash
 systemctl start postgresql
-```
 # 11. Validation
 ## Check Master
-```sql
+sql
 SELECT count(*)
 FROM transactions;
-```
-## Check Replica
-```sql
+## Check Replica Recovery Mode
+Execute on Slave:
+sql
 SELECT pg_is_in_recovery();
-```
 Expected:
-```
 true
-```
-## Check Replication
-Master:
-```sql
+## Check Replication Status
+Execute on Master:
+sql
 SELECT
 client_addr,
-state
+state,
+sync_state
 FROM pg_stat_replication;
-```
 Expected:
-```
 state = streaming
-```
-# 12. Recovery Completion Checklist
+## Check Replication Lag
+Execute on Slave:
+sql
+SELECT
+now() - pg_last_xact_replay_timestamp();
+# 12. Recovery Completion Checklist:
 | Item                             | Status |
-| -------------------------------- | ------ |
+| -- |  |
 | Application traffic restored     | ☐      |
 | Corrupted records repaired       | ☐      |
 | Transaction consistency verified | ☐      |
+| Backup validated                 | ☐      |
 | Replication healthy              | ☐      |
+| Application smoke test completed | ☐      |
 | Monitoring enabled               | ☐      |
 | Incident documented              | ☐      |
-# 13. Lessons Learned
-Preventive improvements:
-* Database change approval workflow
-* Migration testing before production
-* Query review process
-* Audit logging
-* Backup restore testing
-* Monitoring abnormal DELETE/UPDATE operations
-* Regular Disaster Recovery exercises
+
