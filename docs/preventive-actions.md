@@ -44,16 +44,16 @@ Enable auditing for:
 * Schema changes
 Example:
 
-```sql
+sql
 CREATE TABLE audit_log
 (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL Master KEY,
     username TEXT,
     operation TEXT,
     table_name TEXT,
     changed_at TIMESTAMP DEFAULT now()
 );
-```
+
 
 Benefits:
 
@@ -63,7 +63,7 @@ Benefits:
 # 4. Monitoring Strategy
 The monitoring solution uses:
 
-```text
+text
 PostgreSQL
       |
 Postgres Exporter
@@ -73,7 +73,7 @@ Prometheus
 Grafana Dashboard
       |
 Alert Manager
-```
+
 # 5. Database Health Monitoring
 Monitor:
 ## Availability
@@ -81,13 +81,13 @@ Metrics:
 * Database up/down status
 * Connection availability
 Alert Example:
-```yaml
+yaml
 DatabaseDown:
   condition:
     database_available == 0
   severity:
     critical
-```
+
 ## Connection Monitoring
 Track:
 * Active connections
@@ -102,24 +102,24 @@ Monitor PostgreSQL replication:
 Important metrics:
 ## Replication Lag
 Metrهc:
-```text
+text
 replication_lag_seconds
-```
+
 Alert:
-```yaml
+yaml
 ReplicationLagHigh:
   condition:
     replication_lag_seconds > 60
   severity:
     warning
-```
+
 ## Replica Status
 Monitor:
 * Replica connection state
 * WAL replay status
 * Last replay timestamp
 Example:
-```sql
+sql
 SELECT
 client_addr,
 state,
@@ -127,7 +127,7 @@ write_lsn,
 flush_lsn,
 replay_lsn
 FROM pg_stat_replication;
-```
+
 # 7. Abnormal Data Change Detection
 ## Problem
 Unexpected DELETE or UPDATE operations can indicate:
@@ -138,30 +138,30 @@ Unexpected DELETE or UPDATE operations can indicate:
 Track:
 ### DELETE Rate
 Metric:
-```text
+text
 database_deleted_rows_total
-```
+
 Alert Example:
-```yaml
+yaml
 HighDeleteRate:
   condition:
     rate(database_deleted_rows_total[5m]) > threshold
   severity:
     critical
-```
+
 ### UPDATE Rate
 Metric:
-```text
+text
 database_updated_rows_total
-```
+
 Alert Example:
-```yaml
+yaml
 HighUpdateRate:
   condition:
     rate(database_updated_rows_total[5m]) > threshold
   severity:
     warning
-```
+
 # 8. Transaction Monitoring
 Monitor payment transactions:
 Metrics:
@@ -182,17 +182,17 @@ Check:
 * WAL archive status
 * Backup storage capacity
 Example:
-```bash
+bash
 pgbackrest info
-```
+
 Alerts:
-```yaml
+yaml
 BackupFailure:
   condition:
     last_backup_status == failed
   severity:
     critical
-```
+
 # 10. Security Improvements
 Security controls:
 * Enable role-based access control
@@ -216,7 +216,7 @@ Automate:
 * Database monitoring
 # 12. Incident Prevention Checklist
 | Action                         | Status |
-| ------------------------------ | ------ |
+|  |  |
 | Production migration approval  | ☐      |
 | Backup restore testing         | ☐      |
 | Database audit enabled         | ☐      |
@@ -224,7 +224,7 @@ Automate:
 | DELETE/UPDATE alert enabled    | ☐      |
 | DR exercise completed          | ☐      |
 # Conclusion
-By implementing proper change management, auditing, monitoring, and recovery testing, PostgreSQL Payment Service reliability can be improved significantly.
+By implementing proper change managementauditingmonitoringand recovery testingPostgreSQL Payment Service reliability can be improved significantly.
 The combination of:
 * Preventive controls
 * Observability
