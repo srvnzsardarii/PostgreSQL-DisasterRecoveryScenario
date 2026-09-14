@@ -1,55 +1,70 @@
 # PostgreSQL Payment Service Disaster Recovery Plan
-
 ## 1. Purpose
 This document describes the Disaster Recovery (DR) strategy for the PostgreSQL Payment Service.
 The main objectives are:
 * Maintain business continuity
-* Minimize data loss
+* Minimize data loss according to recovery capabilities
 * Reduce service downtime
 * Recover corrupted data safely
-* Restore database availability after a major incident
+* Restore database availability after major incidents
+* Maintain transaction consistency
 # 2. Disaster Recovery Objectives
-The recovery targets are:
-| Objective                      | Target                           |
-| ------------------------------ | -------------------------------- |
-| RPO (Recovery Point Objective) | Near Zero Data Loss              |
-| RTO (Recovery Time Objective)  | Minimum Possible Downtime        |
-| Availability                   | 24/7 Payment Service             |
-| Data Integrity                 | Maintain Transaction Consistency |
+Recovery targets are defined according to:
+* Business SLA requirements
+* Backup strategy
+* WAL retention capability
+* Replication configuration
+| Objective                      | Target                                              |
+|  |  |
+| RPO (Recovery Point Objective) | Minimize data loss based on backup and WAL strategy |
+| RTO (Recovery Time Objective)  | Recovery time according to business SLA             |
+| Availability                   | 24/7 Payment Service                                |
+| Data Integrity                 | Maintain transaction consistency through validation |
 # 3. Backup Strategy
 The backup strategy is based on PostgreSQL native capabilities and pgBackRest.
 ## Backup Components
 Components:
 * PostgreSQL Database
 * WAL Archive
-* Backup Repository
-* pgBackRest
+* pgBackRest Repository
+* Backup Storage
 Architecture:
+text id="5q0i7r"
 
-```
-PostgreSQL Master
+             PostgreSQL Master
 
-        |
-        |
-        | WAL Archive
+                    |
+                    |
+                WAL Archive
 
-        |
-        |
+                    |
+                    |
 
-Backup Repository
+            pgBackRest Repository
 
-        |
-        |
+                    |
+                    |
 
-Point In Time Recovery
+             Backup Storage
 
-```
+
+
+Purpose:
+* Point In Time Recovery
+* Disaster Recovery
+* Data Restoration
 # 4. Backup Policy
+Example backup policy:
 | Backup Type        | Frequency  | Purpose                              |
-| ------------------ | ---------- | ------------------------------------ |
+|  | - |  |
 | Full Backup        | Daily      | Complete database recovery           |
 | Incremental Backup | Hourly     | Reduce backup size and recovery time |
-| WAL Backup         | Continuous | Point In Time Recovery               |
+| WAL Archive        | Continuous | Point In Time Recovery               |
+Backup frequency should be adjusted according to:
+* Database size
+* Transaction volume
+* Recovery objectives
+* Storage cost
 # 5. Backup Validation
 A backup is only useful if it can be restored successfully.
 Backup validation process:
@@ -58,40 +73,40 @@ Backup validation process:
 3. Restore backup in isolated environment
 4. Validate database consistency
 5. Document restore result
-Example validation:
-
-```bash
+Example:
+bash id="f7c7zq"
 pgbackrest info
-```
+Validation should include:
+* Backup availability
+* Restore capability
+* WAL archive availability
+* Database consistency checks
 # 6. Point In Time Recovery Strategy
 Point In Time Recovery (PITR) is used when database changes must be recovered to a specific moment.
 Example:
 Incident time:
-
-```
+text id="1byd6r"
 12:45
-```
-
 Recovery target:
-
-```
+text id="8rh8pp"
 12:44:59
-```
-
-Recovery process:
-
-```
+Revovery process:
+text id="z0z54g"
 Backup
+
   |
-  |
+
 WAL Archive
+
   |
-  |
+
 Restore Database
+
   |
-  |
+
 Recovery Database
-```
+
+
 
 Purpose:
 
@@ -100,8 +115,8 @@ Purpose:
 * Support selective data repair
 # 7. High Availability Strategy
 The PostgreSQL environment uses:
+text id="4pxr8k"
 
-```
              PostgreSQL Master
 
                     |
@@ -113,50 +128,49 @@ The PostgreSQL environment uses:
 
              PostgreSQL Slave
 
-```
-
 ## Master Responsibilities
 * Process write transactions
 * Generate WAL records
 * Provide replication stream
+* Serve production workload
+
 ## Slave Responsibilities
 * Maintain synchronized data copy
-* Provide read access
+* Provide read-only capability
 * Support failover scenarios
 Important:
 A PostgreSQL replica is not a replacement for backup.
-If corrupted WAL records are replicated,
-the standby can contain the same corrupted data.
+
+If corrupted WAL records are replicatedthe Slave can contain the same logical corruption.
+
+Backups are required for logical data recovery.
 # 8. Failover Strategy
 ## Planned Failover
 Used for:
-
 * Maintenance
 * Upgrade
 * Infrastructure changes
-
 Steps:
-
-1. Verify standby health
+1. Verify Slave health
 2. Confirm replication status
-3. Promote standby
-4. Redirect application traffic
-5. Validate application functionality
-
+3. Check replay position
+4. Promote Slave
+5. Redirect application traffic
+6. Validate application functionality
 ## Emergency Failover
 Used during:
-* Master failure
+* Master database failure
 * Infrastructure outage
-
 Steps:
-1. Detect primary failure
-2. Verify standby consistency
-3. Promote healthy standby
-4. Update application connection
-5. Monitor recovery status
+1. Detect Master failure
+2. Verify Slave consistency
+3. Check latest replayed WAL position
+4. Promote healthy Slave
+5. Update application connection
+6. Monitor recovery status
+7. Rebuild failed Master if required
 # 9. Database Corruption Recovery Strategy
 In case of logical data corruption:
-
 Steps:
 1. Stop application writes
 2. Freeze database changes
@@ -166,31 +180,31 @@ Steps:
 6. Compare production and recovery database
 7. Repair only affected records
 8. Validate data consistency
-9. Rebuild replication
+9. Rebuild Slave replication
 # 10. Disaster Scenarios
 ## Scenario 1 — SQL Mistake / Data Corruption
-Example:
+Examples:
 * Wrong DELETE
 * Wrong UPDATE
 * Incorrect migration
-
 Recovery:
-* PITR Restore
-* Data comparison
-* Selective repair
-
+* Stop application writes
+* Restore PITR database
+* Compare data
+* Perform selective repair
 ## Scenario 2 — PostgreSQL Master Failure
 Recovery:
-* Promote standby
+* Verify Slave health
+* Promote Slave
 * Redirect traffic
-* Rebuild failed primary
+* Rebuild failed Master
 ## Scenario 3 — Complete Infrastructure Failure
 Recovery:
 * Provision new infrastructure
 * Restore latest backup
 * Apply WAL archive
 * Validate database
-* Restore service
+* Restore service availability
 # 11. Recovery Testing
 Regular DR testing is required.
 Testing activities:
@@ -198,6 +212,7 @@ Testing activities:
 * PITR recovery test
 * Failover test
 * Replication rebuild test
+* Application validation test
 Test results should be documented.
 # 12. Monitoring and Alerting
 The DR solution should monitor:
@@ -206,16 +221,24 @@ Metrics:
 * Database availability
 * Active connections
 * Transaction rate
+* Query latency
+* Slow queries
+* Lock waits
+* Deadlocks
+* Vacuum status
+* Disk utilization
 ## Replication Health
 Metrics:
 * Replication lag
 * WAL replay status
 * Replica connection state
+* WAL generation rate
 ## Backup Health
 Metrics:
 * Backup success/failure
 * Backup age
 * WAL archive status
+* Backup storage capacity
 # 13. Security Considerations
 Security practices:
 * Encrypt backups
@@ -224,6 +247,9 @@ Security practices:
 * Apply least privilege principle
 * Audit database changes
 * Control production migrations
+* Use TLS database connections
+* Protect Kubernetes Secrets
+* Apply network restrictions
 # 14. Continuous Improvement
 After each incident:
 * Perform Root Cause Analysis
@@ -231,6 +257,7 @@ After each incident:
 * Improve monitoring
 * Automate manual operations
 * Review backup strategy
+* Test Disaster Recovery regularly
 # Conclusion
 This Disaster Recovery strategy provides a reliable approach for protecting the PostgreSQL Payment Service.
 By combining:
