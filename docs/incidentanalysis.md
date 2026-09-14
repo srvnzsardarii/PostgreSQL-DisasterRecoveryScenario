@@ -1,12 +1,12 @@
 # Incident Analysis
 ## 1. Incident Summary
 A production incident occurred on the PostgreSQL Payment Service after an incorrect SQL migration/script was executed against the PostgreSQL Master database.
-The change caused logical data corruption in transactional records, including:
+The change caused logical data corruption in transactional recordsincluding:
 * Incorrect DELETE operations
 * Incorrect UPDATE operations
 * Invalid transaction records
 * Transaction consistency issues
-Because PostgreSQL Streaming Replication was enabled, corrupted WAL changes were replicated to the Slave database.
+Because PostgreSQL Streaming Replication was enabledcorrupted WAL changes were replicated to the Slave database.
 Important:
 The Slave database could not be used as a recovery source because it contained the same logical corruption.
 # 2. Incident Timeline
