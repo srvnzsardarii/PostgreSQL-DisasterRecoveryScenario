@@ -1,4 +1,4 @@
-# PostgreSQL Payment Service Disaster Recovery
+# PostgreSQL Service Disaster Recovery
 ## Overview
 This project demonstrates a real-world PostgreSQL disaster recovery scenario for a payment service running on Kubernetes.
 The objective is to simulate a production database incident where incorrect SQL operations corrupt transactional data and implement a safe recovery strategy with minimum data loss.
